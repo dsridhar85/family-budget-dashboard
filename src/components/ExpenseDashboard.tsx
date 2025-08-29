@@ -21,23 +21,8 @@ type Props = {
   expenses: Expense[];
   targets: Record<string, number>;
   remarks: Record<string, string>;
+  categories: string[];
 };
-
-const categories = [
-  "income",
-  "Eat-out",
-  "Shopping expense",
-  "Utilities",
-  "House loan",
-  "Education",
-  "Home update",
-  "Car expense",
-  "Groceries",
-  "Insurance",
-  "Bauspar",
-  "Vacation",
-  "Other"
-];
 
 const palette = [
   "#26a69a", "#ff7043", "#8d6e63", "#42a5f5", "#d4e157", "#ab47bc",
@@ -60,7 +45,7 @@ function getCumulativePerMonthAndDataMonths(expenses: Expense[], category: strin
       e.date.getFullYear() === year &&
       e.date.getMonth() === m
     );
-    let monthSum = filtered.reduce((sum, e) => sum + (category === "income" ? e.amount : Math.abs(e.amount)), 0);
+    let monthSum = filtered.reduce((sum, e) => sum + (category.toLowerCase() === "income" ? e.amount : Math.abs(e.amount)), 0);
 
     if (!started && monthSum === 0) {
       cum.push(0);
@@ -82,7 +67,7 @@ function getLinearTargetProgress(target: number) {
   return Array.from({ length: 12 }, (_, i) => target * ((i + 1) / 12));
 }
 
-function getCumulativeTotalAndDataMonths(expenses: Expense[], kind: "expenses" | "income", year: number) {
+function getCumulativeTotalAndDataMonths(expenses: Expense[], kind: "expenses" | "income", year: number, categories: string[]) {
   let cumSum = 0;
   const cum: number[] = [];
   const hasData: boolean[] = [];
@@ -92,13 +77,13 @@ function getCumulativeTotalAndDataMonths(expenses: Expense[], kind: "expenses" |
     let filtered: Expense[];
     if (kind === "income") {
       filtered = expenses.filter(e =>
-        e.category === "income" &&
+        e.category.toLowerCase() === "income" &&
         e.date.getFullYear() === year &&
         e.date.getMonth() === m
       );
     } else {
       filtered = expenses.filter(e =>
-        e.category !== "income" &&
+        e.category.toLowerCase() !== "income" &&
         e.date.getFullYear() === year &&
         e.date.getMonth() === m
       );
@@ -146,7 +131,7 @@ type ChartPopupState =
   | { type: "category", cat: string }
   | null;
 
-function ExpenseDashboard({ expenses, targets, remarks }: Props) {
+function ExpenseDashboard({ expenses, targets, remarks, categories }: Props) {
   const thisYear = new Date().getFullYear();
   const yearDates = getYearDates(thisYear);
 
@@ -154,11 +139,11 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
   const [popup, setPopup] = useState<ChartPopupState>(null);
 
   // Individual category charts (except income)
-  const expenseCategories = categories.filter(cat => cat !== "income");
+  const expenseCategories = categories.filter(cat => cat.toLowerCase() !== "income");
 
   // Combined chart: total expenses and income
-  const total = getCumulativeTotalAndDataMonths(expenses, "expenses", thisYear);
-  const income = getCumulativeTotalAndDataMonths(expenses, "income", thisYear);
+  const total = getCumulativeTotalAndDataMonths(expenses, "expenses", thisYear, categories);
+  const income = getCumulativeTotalAndDataMonths(expenses, "income", thisYear, categories);
 
   // Chart data/options for popup
   let popupChart: React.ReactNode = null;
