@@ -7,41 +7,28 @@ import { categorizeExpense } from "./utils/categorizeExpense";
 import EditIcon from "@mui/icons-material/Edit";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 
-const categories = [
-  "income",
-  "Eat-out",
-  "Shopping expense",
-  "Utilities",
-  "House loan",
-  "Education",
-  "Home update",
-  "Car expense",
-  "Groceries",
-  "Insurance",
-  "Bauspar",
-  "Vacation",
-  "Other"
-];
-
 type Targets = Record<string, number>;
 type Remarks = Record<string, string>;
+type Patterns = Record<string, string[]>;
 
 function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [targets, setTargets] = useState<Targets>(() =>
-    Object.fromEntries(categories.map(c => [c, 0]))
-  );
-  const [remarks, setRemarks] = useState<Remarks>(() =>
-    Object.fromEntries(categories.map(c => [c, ""]))
-  );
+  const [categories, setCategories] = useState<string[]>([]);
+  const [targets, setTargets] = useState<Targets>({});
+  const [remarks, setRemarks] = useState<Remarks>({});
+  const [patterns, setPatterns] = useState<Patterns>({});
   const [editOpen, setEditOpen] = useState(false);
-  const [targetsDraft, setTargetsDraft] = useState<Targets>({ ...targets });
-  const [remarksDraft, setRemarksDraft] = useState<Remarks>({ ...remarks });
+  const [targetsDraft, setTargetsDraft] = useState<Targets>({});
+  const [remarksDraft, setRemarksDraft] = useState<Remarks>({});
 
   // Handle multiple file upload and parse for expenses
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
+    if (categories.length === 0 || Object.keys(patterns).length === 0) {
+      setError("Import category/target template first!");
+      return;
+    }
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
@@ -77,7 +64,7 @@ function App() {
             date,
             description,
             amount,
-            category: categorizeExpense(description, amount)
+            category: categorizeExpense(description, amount, patterns, categories)
           });
         }
       }
@@ -105,27 +92,40 @@ function App() {
       const catIdx = header.findIndex(h => String(h).toLowerCase().includes("category"));
       const targetIdx = header.findIndex(h => String(h).toLowerCase().includes("target"));
       const remarkIdx = header.findIndex(h => String(h).toLowerCase().includes("remark"));
+      const patternIdx = header.findIndex(h => String(h).toLowerCase().includes("pattern"));
 
-      if (catIdx === -1 || targetIdx === -1 || remarkIdx === -1) {
-        throw new Error("Target file must have columns: Category, Yearly target in €, Remark");
+      if (catIdx === -1 || targetIdx === -1 || remarkIdx === -1 || patternIdx === -1) {
+        throw new Error("Target file must have columns: Category, Yearly target in €, Remark, Patterns");
       }
 
-      const newTargets: Targets = { ...targets };
-      const newRemarks: Remarks = { ...remarks };
+      const newCategories: string[] = [];
+      const newTargets: Targets = {};
+      const newRemarks: Remarks = {};
+      const newPatterns: Patterns = {};
 
       for (const row of rows.slice(1)) {
         const category = String(row[catIdx]);
-        if (!category || !categories.includes(category)) continue;
+        if (!category) continue;
         const target = Number(row[targetIdx]) || 0;
         const remark = row[remarkIdx] ? String(row[remarkIdx]) : "";
+        const patternStr = row[patternIdx] ? String(row[patternIdx]) : "";
+        if (!patternStr.trim()) throw new Error(`Pattern column is mandatory for category: ${category}`);
+        const patternList = patternStr.split(",").map(s => s.trim()).filter(Boolean);
+        if (!patternList.length) throw new Error(`At least one pattern required for category: ${category}`);
+
+        newCategories.push(category);
         newTargets[category] = target;
         newRemarks[category] = remark;
+        newPatterns[category] = patternList;
       }
 
+      setCategories(newCategories);
       setTargets(newTargets);
       setRemarks(newRemarks);
+      setPatterns(newPatterns);
       setTargetsDraft(newTargets);
       setRemarksDraft(newRemarks);
+      setExpenses([]); // Clear previous expenses, as categories may have changed
     } catch (err: any) {
       setError(err.message ?? "Failed to import target file");
     }
@@ -162,11 +162,11 @@ function App() {
       </Typography>
 
       <Box mb={2} display="flex" justifyContent="center" gap={2} flexWrap="wrap">
-        <Button variant="contained" component="label">
+        <Button variant="contained" component="label" disabled={categories.length === 0}>
           Import Excel
           <input type="file" accept=".xlsx,.xls" hidden onChange={handleFile} multiple />
         </Button>
-        <Button variant="outlined" startIcon={<EditIcon />} onClick={handleEditTargets}>
+        <Button variant="outlined" startIcon={<EditIcon />} onClick={handleEditTargets} disabled={categories.length === 0}>
           Set Yearly Targets
         </Button>
         <Button variant="outlined" startIcon={<UploadFileIcon />} component="label">
@@ -178,7 +178,7 @@ function App() {
         <DialogTitle>Edit Yearly Targets & Remarks per Category (€)</DialogTitle>
         <DialogContent>
           <Grid container spacing={2}>
-            {categories.filter(c => c !== "income").map(cat => (
+            {categories.filter(c => c.toLowerCase() !== "income").map(cat => (
               <Grid container item xs={12} spacing={1} key={cat} alignItems="center">
                 <Grid item xs={12} sm={3}>
                   <Typography noWrap>{cat}</Typography>
@@ -188,7 +188,7 @@ function App() {
                     label="Target (€)"
                     type="number"
                     fullWidth
-                    value={targetsDraft[cat]}
+                    value={targetsDraft[cat] ?? ""}
                     onChange={e => handleTargetChange(cat, e.target.value)}
                     InputProps={{ inputProps: { min: 0 } }}
                   />
@@ -197,7 +197,7 @@ function App() {
                   <TextField
                     label="Remark"
                     fullWidth
-                    value={remarksDraft[cat]}
+                    value={remarksDraft[cat] ?? ""}
                     onChange={e => handleRemarkChange(cat, e.target.value)}
                   />
                 </Grid>
@@ -212,11 +212,12 @@ function App() {
       </Dialog>
       {error && <Alert severity="error">{error}</Alert>}
       {expenses.length > 0 ? (
-        <ExpenseDashboard expenses={expenses} targets={targets} remarks={remarks} />
+        <ExpenseDashboard expenses={expenses} targets={targets} remarks={remarks} categories={categories} />
       ) : (
         <Paper sx={{ p: 2, mt: 3 }}>
           <Typography variant="body2" color="text.secondary">
-            Please import one or more Excel files with columns: <b>Wertstellung</b> (date, dd.mm.yyyy), <b>Buchungstext</b> (description), <b>Betrag</b> (amount in Euro).
+            Please first import a Yearly Target Template Excel with columns: <b>Category</b>, <b>Yearly target in €</b>, <b>Remark</b>, <b>Patterns</b> (comma separated match strings for each category).<br/>
+            After that, you can import one or more Excel files with columns: <b>Wertstellung</b> (date, dd.mm.yyyy), <b>Buchungstext</b> (description), <b>Betrag</b> (amount in Euro).
           </Typography>
         </Paper>
       )}
