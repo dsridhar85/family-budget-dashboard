@@ -1,16 +1,94 @@
 import React, { useState } from "react";
-import { Container, Typography, Button, Box, Paper, Alert } from "@mui/material";
+import { Container, Typography, Button, Box, Paper, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid } from "@mui/material";
 import * as XLSX from "xlsx";
 import ExpenseDashboard from "./components/ExpenseDashboard";
 import { Expense } from "./types";
 import { categorizeExpense } from "./utils/categorizeExpense";
+import EditIcon from "@mui/icons-material/Edit";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+
+const categories = [
+  "income",
+  "Eat-out",
+  "Shopping expense",
+  "Utilities",
+  "House loan",
+  "Education",
+  "Home update",
+  "Car expense",
+  "Groceries",
+  "Insurance",
+  "Bauspar",
+  "Vacation",
+  "Other"
+];
+
+type Targets = Record<string, number>;
+type Remarks = Record<string, string>;
 
 function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [targets, setTargets] = useState<Targets>(() =>
+    Object.fromEntries(categories.map(c => [c, 0]))
+  );
+  const [remarks, setRemarks] = useState<Remarks>(() =>
+    Object.fromEntries(categories.map(c => [c, ""]))
+  );
+  const [editOpen, setEditOpen] = useState(false);
+  const [targetsDraft, setTargetsDraft] = useState<Targets>({ ...targets });
+  const [remarksDraft, setRemarksDraft] = useState<Remarks>({ ...remarks });
 
-  // Handle file upload and parse
+  // Handle multiple file upload and parse for expenses
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    try {
+      let allExpenses: Expense[] = [];
+      for (const file of files) {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as (string | number)[][];
+        if (!rows.length) continue;
+
+        // Find column indices
+        const header = rows[0];
+        const dateIdx = header.findIndex(h => h === "Wertstellung");
+        const descIdx = header.findIndex(h => h === "Buchungstext");
+        const amountIdx = header.findIndex(h => h === "Betrag");
+
+        if (dateIdx === -1 || descIdx === -1 || amountIdx === -1) {
+          throw new Error("Excel sheet must have columns: Wertstellung, Buchungstext, Betrag");
+        }
+
+        for (const row of rows.slice(1)) {
+          if (!row[dateIdx] || !row[descIdx] || !row[amountIdx]) continue;
+          // Parse date dd.mm.yyyy
+          const dateParts = String(row[dateIdx]).split(".");
+          if (dateParts.length !== 3) continue;
+          const date = new Date(+dateParts[2], +dateParts[1] - 1, +dateParts[0]);
+          const description = String(row[descIdx]);
+          let amount = parseFloat(String(row[amountIdx]).replace(",", "."));
+          if (isNaN(amount)) continue;
+          allExpenses.push({
+            date,
+            description,
+            amount,
+            category: categorizeExpense(description, amount)
+          });
+        }
+      }
+      setExpenses(allExpenses);
+    } catch (err: any) {
+      setError(err.message ?? "Failed to parse Excel file");
+    }
+  };
+
+  // Handle yearly target template import
+  const handleTargetImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     const file = e.target.files?.[0];
     if (!file) return;
@@ -19,61 +97,126 @@ function App() {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as string[][];
-      if (!rows.length) throw new Error("Excel file is empty");
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as (string | number)[][];
+      if (!rows.length) throw new Error("Target file is empty");
 
-      // Find column indices
+      // Find columns
       const header = rows[0];
-      const dateIdx = header.findIndex(h => h === "Wertstellung");
-      const descIdx = header.findIndex(h => h === "Buchungstext");
-      const amountIdx = header.findIndex(h => h === "Betrag");
+      const catIdx = header.findIndex(h => String(h).toLowerCase().includes("category"));
+      const targetIdx = header.findIndex(h => String(h).toLowerCase().includes("target"));
+      const remarkIdx = header.findIndex(h => String(h).toLowerCase().includes("remark"));
 
-      if (dateIdx === -1 || descIdx === -1 || amountIdx === -1) {
-        throw new Error("Excel sheet must have columns: Wertstellung, Buchungstext, Betrag");
+      if (catIdx === -1 || targetIdx === -1 || remarkIdx === -1) {
+        throw new Error("Target file must have columns: Category, Yearly target in €, Remark");
       }
 
-      const newExpenses: Expense[] = [];
+      const newTargets: Targets = { ...targets };
+      const newRemarks: Remarks = { ...remarks };
+
       for (const row of rows.slice(1)) {
-        if (!row[dateIdx] || !row[descIdx] || !row[amountIdx]) continue;
-        // Parse date dd.mm.yyyy
-        const dateParts = (row[dateIdx] as string).split(".");
-        if (dateParts.length !== 3) continue;
-        const date = new Date(+dateParts[2], +dateParts[1] - 1, +dateParts[0]);
-        const description = row[descIdx] as string;
-        let amount = parseFloat((row[amountIdx] as string).replace(",", "."));
-        if (isNaN(amount)) continue;
-        newExpenses.push({
-          date,
-          description,
-          amount,
-          category: categorizeExpense(description)
-        });
+        const category = String(row[catIdx]);
+        if (!category || !categories.includes(category)) continue;
+        const target = Number(row[targetIdx]) || 0;
+        const remark = row[remarkIdx] ? String(row[remarkIdx]) : "";
+        newTargets[category] = target;
+        newRemarks[category] = remark;
       }
-      setExpenses(newExpenses);
+
+      setTargets(newTargets);
+      setRemarks(newRemarks);
+      setTargetsDraft(newTargets);
+      setRemarksDraft(newRemarks);
     } catch (err: any) {
-      setError(err.message ?? "Failed to parse Excel file");
+      setError(err.message ?? "Failed to import target file");
     }
   };
 
+  // Handlers for editing targets and remarks
+  const handleEditTargets = () => {
+    setTargetsDraft({ ...targets });
+    setRemarksDraft({ ...remarks });
+    setEditOpen(true);
+  };
+  const handleTargetChange = (category: string, value: string) => {
+    setTargetsDraft(targets => ({
+      ...targets,
+      [category]: Number(value)
+    }));
+  };
+  const handleRemarkChange = (category: string, value: string) => {
+    setRemarksDraft(remarks => ({
+      ...remarks,
+      [category]: value
+    }));
+  };
+  const handleSaveTargets = () => {
+    setTargets({ ...targetsDraft });
+    setRemarks({ ...remarksDraft });
+    setEditOpen(false);
+  };
+
   return (
-    <Container maxWidth="sm" sx={{ pb: 5 }}>
+    <Container maxWidth="md" sx={{ pb: 5 }}>
       <Typography variant="h4" gutterBottom align="center">
         Family Budget Dashboard
       </Typography>
 
-      <Box mb={2} display="flex" justifyContent="center">
+      <Box mb={2} display="flex" justifyContent="center" gap={2} flexWrap="wrap">
         <Button variant="contained" component="label">
           Import Excel
-          <input type="file" accept=".xlsx,.xls" hidden onChange={handleFile} />
+          <input type="file" accept=".xlsx,.xls" hidden onChange={handleFile} multiple />
+        </Button>
+        <Button variant="outlined" startIcon={<EditIcon />} onClick={handleEditTargets}>
+          Set Yearly Targets
+        </Button>
+        <Button variant="outlined" startIcon={<UploadFileIcon />} component="label">
+          Import Yearly Target Template
+          <input type="file" accept=".xlsx,.xls" hidden onChange={handleTargetImport} />
         </Button>
       </Box>
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Edit Yearly Targets & Remarks per Category (€)</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2}>
+            {categories.filter(c => c !== "income").map(cat => (
+              <Grid container item xs={12} spacing={1} key={cat} alignItems="center">
+                <Grid item xs={12} sm={3}>
+                  <Typography noWrap>{cat}</Typography>
+                </Grid>
+                <Grid item xs={12} sm={3}>
+                  <TextField
+                    label="Target (€)"
+                    type="number"
+                    fullWidth
+                    value={targetsDraft[cat]}
+                    onChange={e => handleTargetChange(cat, e.target.value)}
+                    InputProps={{ inputProps: { min: 0 } }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Remark"
+                    fullWidth
+                    value={remarksDraft[cat]}
+                    onChange={e => handleRemarkChange(cat, e.target.value)}
+                  />
+                </Grid>
+              </Grid>
+            ))}
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveTargets} variant="contained">Save</Button>
+        </DialogActions>
+      </Dialog>
       {error && <Alert severity="error">{error}</Alert>}
       {expenses.length > 0 ? (
-        <ExpenseDashboard expenses={expenses} />
+        <ExpenseDashboard expenses={expenses} targets={targets} remarks={remarks} />
       ) : (
         <Paper sx={{ p: 2, mt: 3 }}>
           <Typography variant="body2" color="text.secondary">
-            Please import an Excel file with columns: <b>Wertstellung</b> (date, dd.mm.yyyy), <b>Buchungstext</b> (description), <b>Betrag</b> (amount in Euro).
+            Please import one or more Excel files with columns: <b>Wertstellung</b> (date, dd.mm.yyyy), <b>Buchungstext</b> (description), <b>Betrag</b> (amount in Euro).
           </Typography>
         </Paper>
       )}

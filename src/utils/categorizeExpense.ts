@@ -1,4 +1,5 @@
-export function categorizeExpense(desc: string): string {
+export function categorizeExpense(desc: string, amount: number): string {
+  if (amount > 0) return "income";
   const lc = desc.toLowerCase();
 
   if (/(restaurant|mc donalds|burgerking|bäckerei|baecker)/i.test(desc)) return "Eat-out";
