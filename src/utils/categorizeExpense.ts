@@ -1,16 +1,27 @@
-export function categorizeExpense(desc: string, amount: number): string {
-  if (amount > 0) return "income";
+// Uses user-defined patterns only. No fallback logic.
+import type { Patterns } from "../types";
+
+// Accept the patterns and categories as arguments.
+export function categorizeExpense(
+  desc: string,
+  amount: number,
+  patterns: Patterns,
+  categories: string[]
+): string {
+  if (amount > 0 && categories.includes("income")) return "income";
   const lc = desc.toLowerCase();
 
-  if (/(restaurant|mc donalds|burgerking|bäckerei|baecker)/i.test(desc)) return "Eat-out";
-  if (/(deichmann|c&a|sportscheck|h&m|ernstings|tedi|primark)/i.test(lc)) return "Shopping expense";
-  if (/(o2|vodafone|rundkunft|enercity|e\.on|stadtwerke)/i.test(lc)) return "Utilities";
-  if (/darl\.-leistung/i.test(desc)) return "House loan";
-  if (/(kiga|krippe|betreuung|vimala|kindertagess)/i.test(lc)) return "Education";
-  if (/(ikea|hornbach|möbel|obi|xxllutz|pocco|amazon)/i.test(lc)) return "Home update";
-  if (/(h hx 328|kfz|tüv|shell|esso|aral|total|station|werkstatt|autotechnik)/i.test(lc)) return "Car expense";
-  if (/(rewe|edeka|penny|aldi|netto|kaufland|dm|rossmann|angani)/i.test(lc)) return "Groceries";
-  if (/(generali|advocard)/i.test(desc)) return "Insurance";
-  // TODO: Add logic for Bauspar & Vacation when defined
-  return "Other";
+  // Check user-defined patterns for each category (except income)
+  for (const cat of categories) {
+    if (cat.toLowerCase() === "income") continue;
+    const pats = patterns[cat] || [];
+    for (const pat of pats) {
+      if (pat && lc.includes(pat.toLowerCase())) {
+        return cat;
+      }
+    }
+  }
+  // If not matched, return "Other" if present, else the first category
+  if (categories.includes("Other")) return "Other";
+  return categories[0] ?? "";
 }
