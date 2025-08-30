@@ -36,6 +36,11 @@ const categories = [
   "Insurance",
   "Bauspar",
   "Vacation",
+  "Home cleaning",
+  "Investment",
+  "medical",
+  "Credit card repayment",
+  "Donation",
   "Other"
 ];
 
@@ -54,13 +59,6 @@ function getMinAndMaxDate(expenses: Expense[]): { min: Date, max: Date } | null 
     if (e.date > max) max = e.date;
   }
   return { min, max };
-}
-
-// Generate a sorted array of all dates present in expenses, for X axis labels if needed
-function getSortedExpenseDates(expenses: Expense[]): Date[] {
-  return Array.from(new Set(expenses.map(e => e.date.getTime())))
-    .sort((a, b) => a - b)
-    .map(ts => new Date(ts));
 }
 
 // Cumulative per transaction, respecting sign rules (see latest user instruction)
@@ -85,6 +83,66 @@ function getCumulativePoints(expenses: Expense[], category: string) {
       date: e.date
     };
   });
+}
+
+// Get a sorted array of the first expense in each month for a category
+function getMonthlyExpenseDates(expenses: Expense[]): Date[] {
+  // Group by year-month
+  const monthMap = new Map<string, Date>();
+  for (const e of expenses) {
+    const key = `${e.date.getFullYear()}-${e.date.getMonth()}`;
+    if (!monthMap.has(key) || e.date < monthMap.get(key)!) {
+      monthMap.set(key, e.date);
+    }
+  }
+  // Sort ascending
+  return Array.from(monthMap.values()).sort((a, b) => a.getTime() - b.getTime());
+}
+/**
+ * Build a linear target line for a category.
+ * The line starts from 0 at the date of the first expense,
+ * increases linearly, and reaches the yearly target at 12 months.
+ */
+function buildLinearTargetLine(expenses: Expense[], yearlyTarget: number): { x: Date; y: number }[] {
+  if (!expenses.length || yearlyTarget <= 0) return [];
+  // Find the first expense date for the category
+  const sorted = [...expenses].sort((a, b) => +a.date - +b.date);
+  const startDate = sorted[0].date;
+  // Build 13 points: one per month, 0 ... 12
+  const points: { x: Date; y: number }[] = [];
+  for (let i = 0; i <= 12; ++i) {
+    const x = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
+    const y = yearlyTarget * (i / 12);
+    points.push({ x, y });
+  }
+  return points;
+}
+
+// Build the linear target line as data points for the category
+function buildTargetLine(expenses: Expense[], yearlyTarget: number): { x: Date; y: number }[] {
+  if (!expenses.length || yearlyTarget <= 0) return [];
+  const monthlyDates = getMonthlyExpenseDates(expenses);
+  // Start target from 0 at first month, increase linearly to yearlyTarget at month 12
+  const points: { x: Date; y: number }[] = [];
+  for (let i = 0; i < monthlyDates.length; ++i) {
+    const x = monthlyDates[i];
+    // Target increases by (yearlyTarget/12) per month
+    const y = (yearlyTarget / 12) * (i + 1);
+    points.push({ x, y });
+  }
+  // Fill up to 12 months if fewer than 12, using the last date + 1 month steps
+  let lastDate = monthlyDates[monthlyDates.length - 1];
+  for (let i = monthlyDates.length; i < 12; ++i) {
+    // Add 1 month to lastDate
+    lastDate = new Date(lastDate);
+    lastDate.setMonth(lastDate.getMonth() + 1);
+    const y = (yearlyTarget / 12) * (i + 1);
+    points.push({ x: new Date(lastDate), y });
+  }
+  // Optionally, clamp the last x to the last expense date, so target ends at last actual data point
+  // If you want the last target point to always align with the last actual expense, uncomment:
+  // points[points.length - 1].x = expenses[expenses.length - 1].date;
+  return points;
 }
 
 type ChartPopupState = 
@@ -186,13 +244,14 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
   }
   if (popup?.type === "category") {
     const cat = popup.cat;
-    const points = getCumulativePoints(
-      expenses.filter(e => e.category === cat),
-      cat
-    );
+    const catExpenses = expenses.filter(e => e.category === cat);
+    const points = getCumulativePoints(catExpenses, cat);
     const target = targets[cat] || 0;
     const remark = remarks[cat] || "";
     const i = expenseCategories.indexOf(cat);
+
+    const targetLine = buildLinearTargetLine(catExpenses, target);
+
     popupChart = (
       <Box p={2} sx={{ width: "90vw", maxWidth: 900, height: "70vh" }}>
         <Typography variant="h5" gutterBottom>
@@ -214,25 +273,21 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
                 backgroundColor: palette[i % palette.length],
                 fill: false,
                 tension: 0,
-                pointRadius: 3,
+                pointRadius: 1,
                 borderWidth: 3,
               },
               ...(target > 0
                 ? [{
                     label: "Target",
-                    data: points.length > 0
-                      ? [
-                          { x: points[0].x, y: 0 },
-                          { x: points[points.length - 1].x, y: target }
-                        ]
-                      : [],
+                    data: targetLine,
+                    parsing: { xAxisKey: "x", yAxisKey: "y" },
                     borderColor: "#e53935",
                     backgroundColor: "#e53935",
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    borderDash: [8, 4],
+                    pointRadius: 1,
+                    showLine: true,
                     fill: false,
-                    showLine: true
+                    borderDash: [4, 4],
+                    borderWidth: 2
                   }]
                 : [])
             ]
@@ -244,6 +299,9 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
               tooltip: {
                 callbacks: {
                   label: (ctx: any) => {
+                    if (ctx.dataset.label === "Target") {
+                      return `Target: €${ctx.parsed.y.toFixed(2)}`;
+                    }
                     const e = ctx.raw;
                     let amt = e?.amount !== undefined ? `Δ: €${e.amount.toFixed(2)}` : "";
                     let cum = e?.y !== undefined ? `Cumulative: €${e.y.toFixed(2)}` : "";
@@ -271,7 +329,7 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
         />
         {target > 0 && (
           <Typography variant="caption" color="text.secondary">
-            Yearly Target: €{target.toFixed(2)}
+            Yearly Target: €{target.toFixed(2)} (target increases linearly per month, shown as points)
           </Typography>
         )}
       </Box>
@@ -351,11 +409,10 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
 
       <Grid container spacing={4}>
         {expenseCategories.map((cat, i) => {
-          const points = getCumulativePoints(
-            expenses.filter(e => e.category === cat),
-            cat
-          );
+          const catExpenses = expenses.filter(e => e.category === cat);
+          const points = getCumulativePoints(catExpenses, cat);
           const target = targets[cat] || 0;
+          const targetLine = buildLinearTargetLine(catExpenses, target);
           const remark = remarks[cat] || "";
           return (
             <Grid item xs={12} md={6} key={cat}>
@@ -379,25 +436,21 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
                         backgroundColor: palette[i % palette.length],
                         fill: false,
                         tension: 0,
-                        pointRadius: 2,
+                        pointRadius: 1,
                         borderWidth: 2,
                       },
                       ...(target > 0
                         ? [{
                             label: "Target",
-                            data: points.length > 0
-                              ? [
-                                  { x: points[0].x, y: 0 },
-                                  { x: points[points.length - 1].x, y: target }
-                                ]
-                              : [],
+                            data: targetLine,
+                            parsing: { xAxisKey: "x", yAxisKey: "y" },
                             borderColor: "#e53935",
                             backgroundColor: "#e53935",
-                            pointRadius: 0,
-                            borderWidth: 2,
-                            borderDash: [8, 4],
+                            pointRadius: 1,
+                            showLine: true,
                             fill: false,
-                            showLine: true
+                            borderDash: [4, 4],
+                            borderWidth: 2
                           }]
                         : [])
                     ]
@@ -409,6 +462,9 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
                       tooltip: {
                         callbacks: {
                           label: (ctx: any) => {
+                            if (ctx.dataset.label === "Target") {
+                              return `Target: €${ctx.parsed.y.toFixed(2)}`;
+                            }
                             const e = ctx.raw;
                             let amt = e?.amount !== undefined ? `Δ: €${e.amount.toFixed(2)}` : "";
                             let cum = e?.y !== undefined ? `Cumulative: €${e.y.toFixed(2)}` : "";
@@ -436,7 +492,7 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
                 />
                 {target > 0 && (
                   <Typography variant="caption" color="text.secondary">
-                    Yearly Target: €{target.toFixed(2)}
+                    Yearly Target: €{target.toFixed(2)} (target increases linearly per month, shown as points)
                   </Typography>
                 )}
                 <Typography variant="caption" color="text.secondary">
