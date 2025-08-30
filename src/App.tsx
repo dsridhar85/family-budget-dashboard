@@ -9,7 +9,11 @@ import UploadFileIcon from "@mui/icons-material/UploadFile";
 
 type Targets = Record<string, number>;
 type Remarks = Record<string, string>;
-
+// Function to convert Excel serial date to JavaScript Date
+function excelDateToJSDate(serial) {
+  const excelEpoch = new Date(1899, 11, 30); // Excel epoch starts on 30-Dec-1899
+  return new Date(excelEpoch.getTime() + serial * 86400000); // Add days in milliseconds
+}
 function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +44,7 @@ function App() {
         const data = await file.arrayBuffer();
         const workbook = XLSX.read(data);
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as (string | number)[][];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1,cellDates: true }) as (Date | string | number )[][];
         if (!rows.length) continue;
 
         // Find column indices
@@ -56,9 +60,10 @@ function App() {
         for (const row of rows.slice(1)) {
           if (!row[dateIdx] || !row[descIdx] || !row[amountIdx]) continue;
           // Parse date dd.mm.yyyy
-          const dateParts = String(row[dateIdx]).split(".");
-          if (dateParts.length !== 3) continue;
-          const date = new Date(+dateParts[2], +dateParts[1] - 1, +dateParts[0]);
+          //const dateParts = String(row[dateIdx]).split(".");
+          //if (dateParts.length !== 3) continue;
+          const date = new Date(excelDateToJSDate(row[dateIdx]));
+          //const date = new Date(+dateParts[2], +dateParts[1] - 1, +dateParts[0]);
           const description = String(row[descIdx]);
           let amount = parseFloat(String(row[amountIdx]).replace(",", "."));
           if (isNaN(amount)) continue;

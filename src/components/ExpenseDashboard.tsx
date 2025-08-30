@@ -25,7 +25,8 @@ type Props = {
 
 const categories = [
   "income",
-  "Eat-out",
+  "Eat-outs",
+  "Home cleaning + Cash",
   "Shopping expense",
   "Utilities",
   "House loan",
@@ -36,11 +37,10 @@ const categories = [
   "Insurance",
   "Bauspar",
   "Vacation",
-  "Home cleaning",
   "Investment",
   "medical",
   "Credit card repayment",
-  "Donation",
+  "Donations",
   "Other"
 ];
 
@@ -108,9 +108,10 @@ function buildLinearTargetLine(expenses: Expense[], yearlyTarget: number): { x: 
   // Find the first expense date for the category
   const sorted = [...expenses].sort((a, b) => +a.date - +b.date);
   const startDate = sorted[0].date;
-  // Build 13 points: one per month, 0 ... 12
+  const monthlyDates = getMonthlyExpenseDates(expenses);
+  // Build n  points: one per month, 0 ... till last date
   const points: { x: Date; y: number }[] = [];
-  for (let i = 0; i <= 12; ++i) {
+  for (let i = 0; i <=  monthlyDates.length; ++i) {
     const x = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
     const y = yearlyTarget * (i / 12);
     points.push({ x, y });
@@ -131,17 +132,18 @@ function buildTargetLine(expenses: Expense[], yearlyTarget: number): { x: Date; 
     points.push({ x, y });
   }
   // Fill up to 12 months if fewer than 12, using the last date + 1 month steps
-  let lastDate = monthlyDates[monthlyDates.length - 1];
-  for (let i = monthlyDates.length; i < 12; ++i) {
-    // Add 1 month to lastDate
-    lastDate = new Date(lastDate);
-    lastDate.setMonth(lastDate.getMonth() + 1);
-    const y = (yearlyTarget / 12) * (i + 1);
-    points.push({ x: new Date(lastDate), y });
+  if(monthlyDates.length <12){
+      for (let i = monthlyDates.length; i < 12; ++i) {
+        // Add 1 month to lastDate
+        lastDate = new Date(lastDate);
+        lastDate.setMonth(lastDate.getMonth() + 1);
+      const y = (yearlyTarget / 12) * (i + 1);
+      points.push({ x: new Date(lastDate), y });
+    }
   }
   // Optionally, clamp the last x to the last expense date, so target ends at last actual data point
   // If you want the last target point to always align with the last actual expense, uncomment:
-  // points[points.length - 1].x = expenses[expenses.length - 1].date;
+  points[points.length - 1].x = expenses[expenses.length - 1].date;
   return points;
 }
 
@@ -253,7 +255,7 @@ function ExpenseDashboard({ expenses, targets, remarks }: Props) {
     const targetLine = buildLinearTargetLine(catExpenses, target);
 
     popupChart = (
-      <Box p={2} sx={{ width: "90vw", maxWidth: 900, height: "70vh" }}>
+      <Box p={2} sx={{ width: "100vw", maxWidth: 1200, height: "100vh" }}>
         <Typography variant="h5" gutterBottom>
           {cat} (per transaction)
         </Typography>
