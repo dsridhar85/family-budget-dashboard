@@ -3,30 +3,32 @@ import { Container, Typography, Button, Box, Paper, Alert, Dialog, DialogTitle, 
 import * as XLSX from "xlsx";
 import ExpenseDashboard from "./components/ExpenseDashboard";
 import { Expense } from "./types";
-import { categorizeExpense } from "./utils/categorizeExpense";
+import { categorizeExpense, Patterns } from "./utils/categorizeExpense";
 import EditIcon from "@mui/icons-material/Edit";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 
 type Targets = Record<string, number>;
 type Remarks = Record<string, string>;
-type Patterns = Record<string, string[]>;
 
 function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Everything is now driven by template!
   const [categories, setCategories] = useState<string[]>([]);
   const [targets, setTargets] = useState<Targets>({});
   const [remarks, setRemarks] = useState<Remarks>({});
   const [patterns, setPatterns] = useState<Patterns>({});
+
   const [editOpen, setEditOpen] = useState(false);
   const [targetsDraft, setTargetsDraft] = useState<Targets>({});
   const [remarksDraft, setRemarksDraft] = useState<Remarks>({});
 
-  // Handle multiple file upload and parse for expenses
+  // Handle expense Excel import (after template is imported)
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
-    if (categories.length === 0 || Object.keys(patterns).length === 0) {
-      setError("Import category/target template first!");
+    if (categories.length === 0) {
+      setError("Please import the category/target template first!");
       return;
     }
     const files = Array.from(e.target.files || []);
@@ -64,7 +66,7 @@ function App() {
             date,
             description,
             amount,
-            category: categorizeExpense(description, amount, patterns, categories)
+            category: categorizeExpense(description, patterns, categories)
           });
         }
       }
@@ -74,8 +76,8 @@ function App() {
     }
   };
 
-  // Handle yearly target template import
-  const handleTargetImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle template Excel import (categories, patterns, targets, remarks)
+  const handleTemplateImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setError(null);
     const file = e.target.files?.[0];
     if (!file) return;
@@ -85,7 +87,7 @@ function App() {
       const workbook = XLSX.read(data);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as (string | number)[][];
-      if (!rows.length) throw new Error("Target file is empty");
+      if (!rows.length) throw new Error("Template file is empty");
 
       // Find columns
       const header = rows[0];
@@ -95,7 +97,7 @@ function App() {
       const patternIdx = header.findIndex(h => String(h).toLowerCase().includes("pattern"));
 
       if (catIdx === -1 || targetIdx === -1 || remarkIdx === -1 || patternIdx === -1) {
-        throw new Error("Target file must have columns: Category, Yearly target in €, Remark, Patterns");
+        throw new Error("Template must have columns: Category, Yearly target in €, Remark, Patterns");
       }
 
       const newCategories: string[] = [];
@@ -127,7 +129,7 @@ function App() {
       setRemarksDraft(newRemarks);
       setExpenses([]); // Clear previous expenses, as categories may have changed
     } catch (err: any) {
-      setError(err.message ?? "Failed to import target file");
+      setError(err.message ?? "Failed to import template file");
     }
   };
 
@@ -170,8 +172,8 @@ function App() {
           Set Yearly Targets
         </Button>
         <Button variant="outlined" startIcon={<UploadFileIcon />} component="label">
-          Import Yearly Target Template
-          <input type="file" accept=".xlsx,.xls" hidden onChange={handleTargetImport} />
+          Import Category/Target Template
+          <input type="file" accept=".xlsx,.xls" hidden onChange={handleTemplateImport} />
         </Button>
       </Box>
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} maxWidth="md" fullWidth>
@@ -216,7 +218,7 @@ function App() {
       ) : (
         <Paper sx={{ p: 2, mt: 3 }}>
           <Typography variant="body2" color="text.secondary">
-            Please first import a Yearly Target Template Excel with columns: <b>Category</b>, <b>Yearly target in €</b>, <b>Remark</b>, <b>Patterns</b> (comma separated match strings for each category).<br/>
+            Please first import a Category/Target Template Excel with columns: <b>Category</b>, <b>Yearly target in €</b>, <b>Remark</b>, <b>Patterns</b> (comma separated match strings for each category).<br/>
             After that, you can import one or more Excel files with columns: <b>Wertstellung</b> (date, dd.mm.yyyy), <b>Buchungstext</b> (description), <b>Betrag</b> (amount in Euro).
           </Typography>
         </Paper>

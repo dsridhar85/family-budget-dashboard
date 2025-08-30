@@ -4,5 +4,3 @@ export type Expense = {
   amount: number;
   category: string;
 };
-
-export type Patterns = Record<string, string[]>;
